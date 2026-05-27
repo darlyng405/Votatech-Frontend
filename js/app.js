@@ -1,370 +1,402 @@
-import { getProyectos, crearProyecto, editarProyecto, eliminarProyecto, getRepresentantes, votar, checkHaVotado, getResultados, toggleResultadosPublicos } from './api.js';
+import { getProyectos, crearProyecto, editarProyecto, eliminarProyecto,
+         getRepresentantes, votar, checkHaVotado,
+         getResultados, toggleResultadosPublicos } from './api.js';
 import { showToast, closeModal, updateAdminUI, getDeviceId } from './ui.js';
 import { initAuth } from './auth.js';
 
 let proyectos = [];
-let deviceId = getDeviceId();
-let isAdmin = false;
+let deviceId  = getDeviceId();
+let isAdmin   = false;
 
-// ------------------- Helper -------------------
-function setLoading(containerId) {
-  document.getElementById(containerId).innerHTML = '<div class="loader">Cargando...</div>';
-}
-
-function escapeHtml(str) {
+// ─── Helpers ──────────────────────────────────────────────────────────────
+function esc(str) {
   if (!str) return '';
-  return str.replace(/[&<>"']/g, m => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[m]));
+  return String(str).replace(/[&<>"']/g, m =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
 }
 
-// ------------------- Proyectos -------------------
+function setLoading(id) {
+  document.getElementById(id).innerHTML =
+    '<div class="loader"><span></span><span></span><span></span></div>';
+}
+
+// ─── Proyectos ─────────────────────────────────────────────────────────────
 export async function cargarProyectos() {
   setLoading('proyectos-container');
   const container = document.getElementById('proyectos-container');
   try {
     proyectos = await getProyectos();
     if (!proyectos.length) {
-      container.innerHTML = '<div class="empty-state">No hay proyectos registrados</div>';
+      container.innerHTML = `
+        <div class="empty-state">
+          <span class="empty-icon">🔭</span>
+          <h3>Aún no hay proyectos</h3>
+          <p>Los proyectos registrados aparecerán aquí.</p>
+        </div>`;
       return;
     }
-    const votados = await Promise.all(proyectos.map(p => checkHaVotado(p.id, deviceId)));
-    container.innerHTML = proyectos.map((p, idx) => `
-      <div class="proyecto-card" data-id="${p.id}">
-        <div class="curso-badge">#${p.id}</div>
-        <div class="curso-name">${escapeHtml(p.nombre)}</div>
-        <div class="proyecto-desc">${escapeHtml(p.descripcion || '')}</div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn-sm" onclick="window.verRepresentantes(${p.id})">👥 Representantes</button>
-          <button class="btn-sm success ${votados[idx]?.votado ? 'votado' : ''}"
-                  onclick="window.abrirVotacion(${p.id})"
-                  ${votados[idx]?.votado ? 'disabled' : ''}>
-            ${votados[idx]?.votado ? '✓ Votado' : '🗳 Votar'}
-          </button>
-          ${isAdmin ? `
-            <button class="btn-sm" style="background:#f39c12;color:white;" onclick="window.abrirEdicion(${p.id})">✏️ Editar</button>
-            <button class="btn-sm" style="background:#e74c3c;color:white;" onclick="window.eliminarProyecto(${p.id})">🗑 Eliminar</button>
-          ` : ''}
-        </div>
-      </div>
-    `).join('');
+
+    // Verificar si ya votó en cada proyecto
+    const votados = await Promise.all(
+      proyectos.map(p => checkHaVotado(p.id, deviceId).catch(() => ({ votado: false })))
+    );
+
+    container.innerHTML = proyectos.map((p, i) => {
+      const yaVoto = votados[i]?.votado;
+      const adminBtns = isAdmin ? `
+        <button class="btn-sm warning" onclick="window.abrirEdicion(${p.id})">✏️ Editar</button>
+        <button class="btn-sm danger"  onclick="window.confirmarEliminar(${p.id})">🗑 Eliminar</button>
+      ` : '';
+      return `
+        <div class="proyecto-card">
+          <div class="card-accent"></div>
+          <div class="card-body">
+            <div class="card-badge">Proyecto #${p.id}</div>
+            <div class="curso-name">${esc(p.nombre)}</div>
+            <div class="proyecto-desc">${esc(p.descripcion || 'Sin descripción.')}</div>
+          </div>
+          <div class="card-actions">
+            <button class="btn-sm" onclick="window.verRepresentantes(${p.id})">👥 Equipo</button>
+            <button class="btn-sm ${yaVoto ? 'votado' : 'primary'}"
+                    onclick="${yaVoto ? '' : `window.abrirVotacion(${p.id})`}"
+                    ${yaVoto ? 'disabled' : ''}>
+              ${yaVoto ? '✓ Ya votaste' : '🗳 Votar'}
+            </button>
+            ${adminBtns}
+          </div>
+        </div>`;
+    }).join('');
   } catch (err) {
-    container.innerHTML = '<div class="empty-state">Error al cargar proyectos</div>';
-    showToast(err.message, 'error');
+    container.innerHTML = `<div class="empty-state"><span class="empty-icon">⚠️</span><h3>Error al cargar</h3><p>${esc(err.message)}</p></div>`;
   }
 }
 
+// ─── Ver equipo ────────────────────────────────────────────────────────────
 window.verRepresentantes = async (idProyecto) => {
-  try {
-    const reps = await getRepresentantes(idProyecto);
-    const proyecto = proyectos.find(p => p.id == idProyecto);
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay open';
-    modal.innerHTML = `
-      <div class="modal-box" style="max-width: 500px;">
-        <div class="modal-header">
-          <div class="modal-title">Representantes — ${escapeHtml(proyecto?.nombre || '')}</div>
-          <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="reps-grid">
-            ${reps.map(r => `
-              <div class="rep-card">
-                <div class="rep-avatar-placeholder">${escapeHtml(r.nombre[0])}</div>
-                <div class="rep-name">${escapeHtml(r.nombre)}</div>
-                <div class="rep-curso">${escapeHtml(r.curso || '—')}</div>
-                <div class="rep-contact">📱 ${escapeHtml(r.contacto || '—')}</div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
+  const proyecto = proyectos.find(p => p.id == idProyecto);
+  let reps = [];
+  try { reps = await getRepresentantes(idProyecto); } catch {}
+
+  const existing = document.getElementById('modal-reps');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-reps';
+  modal.className = 'modal-overlay open';
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:480px;">
+      <div class="modal-header">
+        <div class="modal-title">Equipo — ${esc(proyecto?.nombre)}</div>
+        <button class="modal-close" onclick="document.getElementById('modal-reps').remove()">✕</button>
       </div>
-    `;
-    document.body.appendChild(modal);
-  } catch (err) {
-    showToast('Error al cargar representantes', 'error');
-  }
+      <div class="modal-body">
+        ${reps.length
+          ? `<div class="reps-grid">${reps.map(r => `
+              <div class="rep-card">
+                <div class="rep-avatar-placeholder">${esc(r.nombre[0]).toUpperCase()}</div>
+                <div class="rep-name">${esc(r.nombre)}</div>
+                <div class="rep-curso">${esc(r.curso || '—')}</div>
+                <div class="rep-contact">${r.contacto ? '📱 ' + esc(r.contacto) : ''}</div>
+              </div>`).join('')}
+            </div>`
+          : '<div class="empty-state"><span class="empty-icon">👤</span><p>Sin integrantes registrados.</p></div>'
+        }
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 };
 
+// ─── Votar ─────────────────────────────────────────────────────────────────
 window.abrirVotacion = (idProyecto) => {
   const proyecto = proyectos.find(p => p.id == idProyecto);
   if (!proyecto) return;
-  const modal = document.getElementById('modal-voto');
-  document.getElementById('modal-voto-title').innerHTML = `Votar: ${escapeHtml(proyecto.nombre)}`;
+
+  document.getElementById('modal-voto-title').textContent = 'Emitir voto';
   document.getElementById('modal-voto-body').innerHTML = `
+    <div class="voto-proyecto-nombre">${esc(proyecto.nombre)}</div>
     <div class="form-group">
-      <label>PIN del proyecto (4 dígitos)</label>
-      <input type="tel" id="voto-pin" maxlength="4" inputmode="numeric" placeholder="Ej: 1234" autocomplete="off">
+      <label>PIN del proyecto</label>
+      <input type="tel" id="voto-pin" maxlength="4" inputmode="numeric"
+             class="pin-input" placeholder="• • • •" autocomplete="off">
+      <div class="pin-hint">Pide el PIN de 4 dígitos a los representantes del proyecto.</div>
     </div>
-    <button id="confirmar-voto" class="btn-primary">Verificar y votar</button>
-    <div id="voto-error" class="error-msg" style="display:none;"></div>
+    <button id="confirmar-voto" class="btn-primary">Confirmar voto</button>
+    <div id="voto-error" class="error-msg"></div
   `;
+
+  const modal = document.getElementById('modal-voto');
   modal.classList.add('open');
-  document.getElementById('voto-pin').focus();
-  const confirmBtn = document.getElementById('confirmar-voto');
-  const errorDiv = document.getElementById('voto-error');
-  const handler = async () => {
+  setTimeout(() => document.getElementById('voto-pin')?.focus(), 100);
+
+  const confirm = async () => {
     const pin = document.getElementById('voto-pin').value.trim();
+    const errEl = document.getElementById('voto-error');
+    const btn   = document.getElementById('confirmar-voto');
+    errEl.style.display = 'none';
     if (!pin || pin.length !== 4) {
-      errorDiv.textContent = 'Ingresa el PIN de 4 dígitos';
-      errorDiv.style.display = 'block';
+      errEl.textContent = 'Ingresa el PIN de 4 dígitos.';
+      errEl.style.display = 'block';
       return;
     }
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = 'Verificando...';
+    btn.disabled = true;
+    btn.textContent = 'Verificando…';
     try {
       await votar(proyecto.id, pin, deviceId);
-      showToast('¡Voto registrado exitosamente!', 'success');
+      showToast('¡Voto registrado! 🎉', 'success');
       closeModal('modal-voto');
       cargarProyectos();
       cargarResultados();
     } catch (err) {
-      errorDiv.textContent = err.message;
-      errorDiv.style.display = 'block';
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = 'Verificar y votar';
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Confirmar voto';
     }
   };
-  confirmBtn.onclick = handler;
-  document.getElementById('voto-pin').onkeypress = (e) => { if (e.key === 'Enter') handler(); };
+
+  document.getElementById('confirmar-voto').onclick = confirm;
+  document.getElementById('voto-pin').onkeydown = e => { if (e.key === 'Enter') confirm(); };
   document.getElementById('modal-voto-close').onclick = () => closeModal('modal-voto');
 };
 
-window.eliminarProyecto = async (id) => {
-  if (!confirm('¿Eliminar este proyecto? Se perderán sus votos.')) return;
-  try {
-    await eliminarProyecto(id);
-    showToast('Proyecto eliminado', 'success');
-    cargarProyectos();
-    cargarResultados();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
+// ─── Eliminar con confirmación ────────────────────────────────────────────
+window.confirmarEliminar = (id) => {
+  const proyecto = proyectos.find(p => p.id == id);
+  if (!confirm(`¿Eliminar "${proyecto?.nombre}"? Se borrarán todos sus votos.`)) return;
+  eliminarProyecto(id)
+    .then(() => { showToast('Proyecto eliminado', 'success'); cargarProyectos(); cargarResultados(); })
+    .catch(err => showToast(err.message, 'error'));
 };
 
-// Fix bug #6: abrir modal de edición con datos precargados
+// ─── Editar proyecto ───────────────────────────────────────────────────────
 window.abrirEdicion = (idProyecto) => {
-  const proyecto = proyectos.find(p => p.id == idProyecto);
-  if (!proyecto) return;
-  document.getElementById('proyecto-modal-title').innerText = 'Editar Proyecto';
-  document.getElementById('proy-nombre').value = proyecto.nombre;
-  document.getElementById('proy-desc').value = proyecto.descripcion || '';
-  document.getElementById('proy-pin').value = '';
-  document.getElementById('proy-pin').placeholder = 'Dejar vacío para no cambiar';
+  const p = proyectos.find(x => x.id == idProyecto);
+  if (!p) return;
+  document.getElementById('proyecto-modal-title').textContent = 'Editar proyecto';
+  document.getElementById('proy-nombre').value = p.nombre;
+  document.getElementById('proy-desc').value   = p.descripcion || '';
+  document.getElementById('proy-pin').value    = '';
+  document.getElementById('pin-hint').textContent = 'Dejar vacío para mantener el PIN actual.';
   document.getElementById('reps-container').innerHTML = '';
   document.getElementById('proyecto-error').style.display = 'none';
-
-  // Guardar referencia al proyecto que se edita
   document.getElementById('modal-proyecto').dataset.editId = idProyecto;
   document.getElementById('modal-proyecto').classList.add('open');
 };
 
-// ------------------- Resultados -------------------
+// ─── Resultados ────────────────────────────────────────────────────────────
 export async function cargarResultados() {
   setLoading('resultados-container');
   const container = document.getElementById('resultados-container');
   try {
     const data = await getResultados(isAdmin);
+    const btnToggle = document.getElementById('btn-toggle-resultados');
+    if (isAdmin && btnToggle) {
+      btnToggle.textContent = data.publicos ? '🔒 Ocultar resultados' : '📢 Publicar resultados';
+    }
     if (!data.publicos && !isAdmin) {
-      container.innerHTML = '<div class="empty-state">🔒 Los resultados aún no han sido publicados.</div>';
+      container.innerHTML = `
+        <div class="resultados-bloqueados">
+          <div class="lock-icon">🔒</div>
+          <h3>Resultados no disponibles</h3>
+          <p>El administrador publicará los resultados al finalizar la votación.</p>
+        </div>`;
       return;
     }
     const ranking = data.ranking || [];
     if (!ranking.length) {
-      container.innerHTML = '<div class="empty-state">Aún no hay votos registrados.</div>';
+      container.innerHTML = `<div class="empty-state"><span class="empty-icon">🗳</span><h3>Sin votos aún</h3><p>Los votos aparecerán aquí en tiempo real.</p></div>`;
       return;
     }
-    const maxVotos = Math.max(...ranking.map(r => r.votos), 1);
-    container.innerHTML = ranking.map((r, i) => {
-      const posClass = i === 0 ? 'oro' : i === 1 ? 'plata' : i === 2 ? 'bronce' : '';
+    const maxV = Math.max(...ranking.map(r => r.votos), 1);
+    const posClases = ['oro', 'plata', 'bronce'];
+    const cardClases = ['top1', 'top2', 'top3'];
+    container.innerHTML = `<div class="ranking-list">${ranking.map((r, i) => {
+      const pc = posClases[i] || 'otro';
+      const cc = cardClases[i] || '';
+      const pct = Math.round((r.votos / maxV) * 100);
       return `
-        <div class="resultado-card">
-          <div class="resultado-pos ${posClass}">#${i + 1}</div>
-          <div style="flex:1;">
-            <div style="font-weight:700;">${escapeHtml(r.nombre)}</div>
-            <div class="resultado-barra"><div class="resultado-barra-fill" style="width:${(r.votos / maxVotos) * 100}%;"></div></div>
+        <div class="resultado-card ${cc}">
+          <div class="resultado-pos ${pc}">${i < 3 ? ['🥇','🥈','🥉'][i] : i + 1}</div>
+          <div class="resultado-info">
+            <div class="resultado-nombre">${esc(r.nombre)}</div>
+            <div class="resultado-barra-wrap">
+              <div class="resultado-barra">
+                <div class="resultado-barra-fill" style="width:${pct}%"></div>
+              </div>
+              <span class="resultado-votos-label">${pct}%</span>
+            </div>
           </div>
-          <div style="font-size:22px;font-weight:700;">${r.votos} 🗳</div>
-        </div>
-      `;
-    }).join('');
+          <div class="resultado-count">${r.votos}</div>
+        </div>`;
+    }).join('')}</div>`;
   } catch (err) {
-    container.innerHTML = '<div class="empty-state">Error al cargar resultados</div>';
-    showToast(err.message, 'error');
+    container.innerHTML = `<div class="empty-state"><span class="empty-icon">⚠️</span><h3>Error</h3><p>${esc(err.message)}</p></div>`;
   }
 }
 
-// ------------------- Admin: Formulario Crear/Editar -------------------
+// ─── Formulario admin: crear / editar ─────────────────────────────────────
 function initAdminForms() {
-  const btnNuevo = document.getElementById('btn-nuevo-proyecto');
-  const modalProy = document.getElementById('modal-proyecto');
-  const closeProy = document.getElementById('modal-proyecto-close');
-  const cancelProy = document.getElementById('cancelar-proyecto');
-  const agregarRep = document.getElementById('agregar-rep');
-  const guardarProy = document.getElementById('guardar-proyecto');
+  const modal     = document.getElementById('modal-proyecto');
+  const closeBtn  = document.getElementById('modal-proyecto-close');
+  const cancelBtn = document.getElementById('cancelar-proyecto');
+  const addRepBtn = document.getElementById('agregar-rep');
+  const saveBtn   = document.getElementById('guardar-proyecto');
+  const errEl     = document.getElementById('proyecto-error');
 
-  btnNuevo.onclick = () => {
-    document.getElementById('proyecto-modal-title').innerText = 'Registrar Proyecto';
-    document.getElementById('proy-nombre').value = '';
-    document.getElementById('proy-desc').value = '';
-    document.getElementById('proy-pin').value = '';
-    document.getElementById('proy-pin').placeholder = '1234';
-    document.getElementById('reps-container').innerHTML = `
-      <div class="rep-row">
-        <input type="text" placeholder="Nombre completo" class="rep-nombre">
-        <input type="text" placeholder="Curso/Grado" class="rep-curso">
-        <input type="text" placeholder="Contacto" class="rep-contacto">
-      </div>
-    `;
-    document.getElementById('proyecto-error').style.display = 'none';
-    delete modalProy.dataset.editId; // asegurarse que no hay id de edición
-    modalProy.classList.add('open');
-  };
-
-  closeProy.onclick = () => { modalProy.classList.remove('open'); delete modalProy.dataset.editId; };
-  cancelProy.onclick = () => { modalProy.classList.remove('open'); delete modalProy.dataset.editId; };
-
-  agregarRep.onclick = () => {
-    const container = document.getElementById('reps-container');
+  function newRepRow() {
     const row = document.createElement('div');
     row.className = 'rep-row';
     row.innerHTML = `
       <input type="text" placeholder="Nombre completo" class="rep-nombre">
-      <input type="text" placeholder="Curso/Grado" class="rep-curso">
-      <input type="text" placeholder="Contacto" class="rep-contacto">
-      <button type="button" class="btn-sm" style="background:#e74c3c;color:white;" onclick="this.parentElement.remove()">✕</button>
-    `;
-    container.appendChild(row);
-  };
+      <input type="text" placeholder="Curso/Grado"     class="rep-curso" style="max-width:110px;">
+      <input type="text" placeholder="Contacto"        class="rep-contacto" style="max-width:110px;">
+      <button type="button" class="btn-sm danger" onclick="this.parentElement.remove()" title="Quitar">✕</button>`;
+    return row;
+  }
 
-  guardarProy.onclick = async () => {
-    const nombre = document.getElementById('proy-nombre').value.trim();
+  function openCrear() {
+    document.getElementById('proyecto-modal-title').textContent = 'Registrar proyecto';
+    document.getElementById('proy-nombre').value = '';
+    document.getElementById('proy-desc').value   = '';
+    document.getElementById('proy-pin').value    = '';
+    document.getElementById('pin-hint').textContent = 'Los visitantes usarán este PIN para votar.';
+    errEl.style.display = 'none';
+    const repsContainer = document.getElementById('reps-container');
+    repsContainer.innerHTML = '';
+    repsContainer.appendChild(newRepRow());
+    delete modal.dataset.editId;
+    modal.classList.add('open');
+  }
+
+  document.getElementById('btn-nuevo-proyecto').onclick = openCrear;
+  closeBtn.onclick  = () => { modal.classList.remove('open'); delete modal.dataset.editId; };
+  cancelBtn.onclick = () => { modal.classList.remove('open'); delete modal.dataset.editId; };
+  addRepBtn.onclick = () => document.getElementById('reps-container').appendChild(newRepRow());
+
+  saveBtn.onclick = async () => {
+    const nombre     = document.getElementById('proy-nombre').value.trim();
     const descripcion = document.getElementById('proy-desc').value.trim();
-    const pin = document.getElementById('proy-pin').value.trim();
-    const editId = modalProy.dataset.editId;
-    const errorEl = document.getElementById('proyecto-error');
+    const pin        = document.getElementById('proy-pin').value.trim();
+    const editId     = modal.dataset.editId;
+    errEl.style.display = 'none';
 
-    // Fix bug #6: modo edición vs creación
+    if (!nombre) { errEl.textContent = 'El nombre es obligatorio.'; errEl.style.display = 'block'; return; }
+
     if (editId) {
-      // Edición — solo campos modificados
-      if (!nombre) {
-        errorEl.textContent = 'El nombre es obligatorio';
-        errorEl.style.display = 'block';
-        return;
-      }
+      // — Edición —
       if (pin && !/^\d{4}$/.test(pin)) {
-        errorEl.textContent = 'El PIN debe ser 4 dígitos o dejarse vacío';
-        errorEl.style.display = 'block';
-        return;
+        errEl.textContent = 'El PIN debe ser de 4 dígitos o déjalo vacío.';
+        errEl.style.display = 'block'; return;
       }
       const datos = { nombre, descripcion };
       if (pin) datos.pin = pin;
+      saveBtn.disabled = true; saveBtn.textContent = 'Guardando…';
       try {
         await editarProyecto(editId, datos);
-        showToast('Proyecto actualizado correctamente', 'success');
-        modalProy.classList.remove('open');
-        delete modalProy.dataset.editId;
+        showToast('Proyecto actualizado ✓', 'success');
+        modal.classList.remove('open'); delete modal.dataset.editId;
         cargarProyectos();
-      } catch (err) {
-        errorEl.textContent = err.message;
-        errorEl.style.display = 'block';
-      }
+      } catch (err) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+      finally { saveBtn.disabled = false; saveBtn.textContent = 'Guardar'; }
     } else {
-      // Creación — todos los campos requeridos
+      // — Creación —
+      if (!/^\d{4}$/.test(pin)) {
+        errEl.textContent = 'El PIN debe ser de 4 dígitos.';
+        errEl.style.display = 'block'; return;
+      }
       const repRows = document.querySelectorAll('#reps-container .rep-row');
       const representantes = [];
       repRows.forEach(row => {
-        const nombreRep = row.querySelector('.rep-nombre')?.value.trim();
-        if (nombreRep) {
-          representantes.push({
-            nombre: nombreRep,
-            curso: row.querySelector('.rep-curso')?.value.trim() || '',
-            contacto: row.querySelector('.rep-contacto')?.value.trim() || ''
-          });
-        }
+        const n = row.querySelector('.rep-nombre')?.value.trim();
+        if (n) representantes.push({
+          nombre: n,
+          curso:    row.querySelector('.rep-curso')?.value.trim() || '',
+          contacto: row.querySelector('.rep-contacto')?.value.trim() || ''
+        });
       });
-      if (!nombre || !pin || representantes.length === 0) {
-        errorEl.textContent = 'Completa nombre, PIN y al menos un representante';
-        errorEl.style.display = 'block';
-        return;
+      if (!representantes.length) {
+        errEl.textContent = 'Agrega al menos un integrante.';
+        errEl.style.display = 'block'; return;
       }
-      if (!/^\d{4}$/.test(pin)) {
-        errorEl.textContent = 'El PIN debe ser 4 dígitos';
-        errorEl.style.display = 'block';
-        return;
-      }
+      saveBtn.disabled = true; saveBtn.textContent = 'Guardando…';
       try {
         await crearProyecto({ nombre, descripcion, pin, representantes });
-        showToast('Proyecto creado correctamente', 'success');
-        modalProy.classList.remove('open');
+        showToast('Proyecto registrado ✓', 'success');
+        modal.classList.remove('open');
         cargarProyectos();
-      } catch (err) {
-        errorEl.textContent = err.message;
-        errorEl.style.display = 'block';
-      }
+      } catch (err) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+      finally { saveBtn.disabled = false; saveBtn.textContent = 'Guardar'; }
     }
   };
 }
 
-// ------------------- Admin: Publicar resultados -------------------
+// ─── Toggle resultados ────────────────────────────────────────────────────
 function initResultadosAdmin() {
-  const btnToggle = document.getElementById('btn-toggle-resultados');
-  btnToggle.onclick = async () => {
+  document.getElementById('btn-toggle-resultados').onclick = async () => {
     try {
       const data = await toggleResultadosPublicos();
-      btnToggle.textContent = data.publicos ? '🔒 OCULTAR RESULTADOS' : '📢 PUBLICAR RESULTADOS';
-      showToast(`Resultados ${data.publicos ? 'publicados' : 'ocultados'}`, 'success');
+      showToast(`Resultados ${data.publicos ? 'publicados 🎉' : 'ocultados'}`, 'success');
       cargarResultados();
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
+    } catch (err) { showToast(err.message, 'error'); }
   };
 }
 
-// ------------------- Navegación -------------------
+// ─── Navegación ────────────────────────────────────────────────────────────
+function cambiarVista(view) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(`view-${view}`)?.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
+  document.querySelectorAll('.bottom-nav-item[data-view]').forEach(n => n.classList.toggle('active', n.dataset.view === view));
+  if (view === 'proyectos') cargarProyectos();
+  if (view === 'resultados') cargarResultados();
+  document.getElementById('sidebar').classList.remove('open');
+}
+
 function initNavigation() {
-  const navItems = document.querySelectorAll('.nav-item');
-  const views = {
-    proyectos: document.getElementById('view-proyectos'),
-    resultados: document.getElementById('view-resultados')
-  };
-  navItems.forEach(item => {
-    item.addEventListener('click', () => {
-      const view = item.dataset.view;
-      Object.values(views).forEach(v => v.classList.remove('active'));
-      views[view].classList.add('active');
-      navItems.forEach(n => n.classList.remove('active'));
-      item.classList.add('active');
-      if (view === 'proyectos') cargarProyectos();
-      if (view === 'resultados') cargarResultados();
-      document.getElementById('sidebar').classList.remove('open');
-    });
-  });
+  document.querySelectorAll('.nav-item[data-view]').forEach(item =>
+    item.addEventListener('click', () => cambiarVista(item.dataset.view)));
+
+  document.querySelectorAll('.bottom-nav-item[data-view]').forEach(item =>
+    item.addEventListener('click', () => cambiarVista(item.dataset.view)));
 }
 
 function initMobileMenu() {
-  const menuToggle = document.getElementById('menu-toggle');
+  const toggle  = document.getElementById('menu-toggle');
   const sidebar = document.getElementById('sidebar');
-  menuToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
-  document.addEventListener('click', (e) => {
+  toggle.addEventListener('click', () => sidebar.classList.toggle('open'));
+  document.addEventListener('click', e => {
     if (window.innerWidth <= 768 && sidebar.classList.contains('open')
-        && !sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
+        && !sidebar.contains(e.target) && !toggle.contains(e.target))
       sidebar.classList.remove('open');
+  });
+
+  // Bottom nav: botón admin
+  document.getElementById('bnav-admin').addEventListener('click', () => {
+    if (isAdmin) {
+      if (confirm('¿Cerrar sesión?')) { document.getElementById('btn-logout').click(); }
+    } else {
+      document.getElementById('btn-login').click();
     }
   });
 }
 
-// ------------------- Main -------------------
+// ─── Bootstrap ────────────────────────────────────────────────────────────
 (async function () {
   initAuth();
   initNavigation();
   initMobileMenu();
   initAdminForms();
   initResultadosAdmin();
+
   isAdmin = !!localStorage.getItem('adminToken');
   updateAdminUI(isAdmin);
-  window.cargarProyectos = cargarProyectos;
+
+  // Exponer para auth.js
+  window.cargarProyectos  = cargarProyectos;
   window.cargarResultados = cargarResultados;
+  window.setIsAdmin = (val) => { isAdmin = val; };
+
   await cargarProyectos();
   await cargarResultados();
 })();
