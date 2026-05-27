@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1b2d">
+  <title>Feria Tecnología — IPMHU</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="toast-container" class="toast-container"></div>
+
+  <div id="app">
+
+    <!-- ── MOBILE: Header top ── -->
+    <header class="mobile-header">
+      <div class="mobile-logo">Feria <span>IPMHU</span></div>
+      <button id="menu-toggle" class="menu-toggle" aria-label="Menú">☰</button>
+    </header>
+
+    <!-- ── SIDEBAR (desktop) / drawer (mobile) ── -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">Feria de<br><span>Tecnología</span></div>
+        <div class="sidebar-sub">IPMHU · 2025 – 2026</div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-item active" data-view="proyectos">
+          <span class="nav-icon">🚀</span> Proyectos
+        </div>
+        <div class="nav-item" data-view="resultados">
+          <span class="nav-icon">🏆</span> Resultados
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="btn-login"  class="btn-login">🔐 Administrador</button>
+        <button id="btn-logout" class="btn-logout" style="display:none;">🚪 Cerrar sesión</button>
+      </div>
+    </aside>
+
+    <!-- ── MAIN ── -->
+    <main class="main-content">
+
+      <!-- Vista: Proyectos -->
+      <div id="view-proyectos" class="view active">
+        <div class="content-header">
+          <div>
+            <div class="page-title">Proyectos</div>
+            <div class="page-sub">Feria de Tecnología 2025–2026</div>
+          </div>
+          <button id="btn-nuevo-proyecto" class="btn-header admin-only" style="display:none;">
+            ＋ Nuevo proyecto
+          </button>
+        </div>
+        <div class="content-body">
+          <div id="proyectos-container" class="cursos-grid"></div>
+        </div>
+      </div>
+
+      <!-- Vista: Resultados -->
+      <div id="view-resultados" class="view">
+        <div class="content-header">
+          <div>
+            <div class="page-title">Resultados</div>
+            <div class="page-sub">Ranking de votaciones</div>
+          </div>
+          <button id="btn-toggle-resultados" class="btn-header gold admin-only" style="display:none;">
+            📢 Publicar resultados
+          </button>
+        </div>
+        <div class="content-body">
+          <div id="resultados-container"></div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ── MOBILE: Bottom nav ── -->
+    <nav class="bottom-nav">
+      <div class="bottom-nav-item active" data-view="proyectos">
+        <span class="bnav-icon">🚀</span>Proyectos
+      </div>
+      <div class="bottom-nav-item" data-view="resultados">
+        <span class="bnav-icon">🏆</span>Resultados
+      </div>
+      <div class="bottom-nav-item bottom-nav-admin" id="bnav-admin">
+        <span class="bnav-icon">🔐</span>Admin
+      </div>
+    </nav>
+
+  </div><!-- /#app -->
+
+
+  <!-- ════════════════════════════════════════
+       MODALES
+       ════════════════════════════════════════ -->
+
+  <!-- Modal: votar -->
+  <div id="modal-voto" class="modal-overlay">
+    <div class="modal-box" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-voto-title">Votar</div>
+        <button id="modal-voto-close" class="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-voto-body"></div>
+    </div>
+  </div>
+
+  <!-- Modal: login admin -->
+  <div id="modal-login" class="modal-overlay">
+    <div class="modal-box" style="max-width:380px;">
+      <div class="modal-header">
+        <div class="modal-title">Acceso Administrador</div>
+        <button id="modal-login-close" class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>PIN de administrador</label>
+          <input type="tel" id="login-pin" maxlength="8" inputmode="numeric"
+                 class="pin-input" placeholder="• • • • • • • •" autocomplete="off">
+        </div>
+        <button id="login-submit" class="btn-primary">Ingresar</button>
+        <div id="login-error" class="error-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: crear / editar proyecto -->
+  <div id="modal-proyecto" class="modal-overlay">
+    <div class="modal-box" style="max-width:580px;">
+      <div class="modal-header">
+        <div class="modal-title" id="proyecto-modal-title">Registrar proyecto</div>
+        <button id="modal-proyecto-close" class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Nombre del proyecto</label>
+          <input type="text" id="proy-nombre" placeholder="Ej: Robot reciclador">
+        </div>
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea id="proy-desc" rows="3" placeholder="Breve descripción del proyecto..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>PIN (4 dígitos)</label>
+          <input type="tel" id="proy-pin" maxlength="4" inputmode="numeric"
+                 placeholder="1234" class="pin-input">
+          <div class="pin-hint" id="pin-hint">Los visitantes usarán este PIN para votar.</div>
+        </div>
+        <div class="form-group">
+          <label>Integrantes del equipo</label>
+          <div id="reps-container"></div>
+          <button type="button" id="agregar-rep" class="btn-add-rep">＋ Agregar integrante</button>
+        </div>
+        <div id="proyecto-error" class="error-msg"></div>
+        <div class="form-actions">
+          <button id="guardar-proyecto" class="btn-primary">Guardar</button>
+          <button id="cancelar-proyecto" class="btn-sm" style="flex:0 0 auto;padding:13px 18px;">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: representantes (dinámico) -->
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
