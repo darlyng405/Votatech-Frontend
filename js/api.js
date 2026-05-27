@@ -50,6 +50,14 @@ export async function crearProyecto(proyecto) {
   });
 }
 
+// Fix bug #6: función de edición que antes faltaba en el frontend
+export async function editarProyecto(id, datos) {
+  return request(`/proyectos/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(datos),
+  });
+}
+
 export async function eliminarProyecto(id) {
   return request(`/proyectos/${id}`, { method: 'DELETE' });
 }

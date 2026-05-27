@@ -1,4 +1,4 @@
-import { getProyectos, crearProyecto, eliminarProyecto, getRepresentantes, votar, checkHaVotado, getResultados, toggleResultadosPublicos } from './api.js';
+import { getProyectos, crearProyecto, editarProyecto, eliminarProyecto, getRepresentantes, votar, checkHaVotado, getResultados, toggleResultadosPublicos } from './api.js';
 import { showToast, closeModal, updateAdminUI, getDeviceId } from './ui.js';
 import { initAuth } from './auth.js';
 
@@ -7,22 +7,27 @@ let deviceId = getDeviceId();
 let isAdmin = false;
 
 // ------------------- Helper -------------------
-function setLoading(containerId, show) {
-  const container = document.getElementById(containerId);
-  if (show) container.innerHTML = '<div class="loader">Cargando...</div>';
+function setLoading(containerId) {
+  document.getElementById(containerId).innerHTML = '<div class="loader">Cargando...</div>';
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>"']/g, m => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[m]));
 }
 
 // ------------------- Proyectos -------------------
 export async function cargarProyectos() {
+  setLoading('proyectos-container');
   const container = document.getElementById('proyectos-container');
-  setLoading('proyectos-container', true);
   try {
     proyectos = await getProyectos();
     if (!proyectos.length) {
       container.innerHTML = '<div class="empty-state">No hay proyectos registrados</div>';
       return;
     }
-    // Obtener votos ya emitidos por este device
     const votados = await Promise.all(proyectos.map(p => checkHaVotado(p.id, deviceId)));
     container.innerHTML = proyectos.map((p, idx) => `
       <div class="proyecto-card" data-id="${p.id}">
@@ -31,12 +36,15 @@ export async function cargarProyectos() {
         <div class="proyecto-desc">${escapeHtml(p.descripcion || '')}</div>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           <button class="btn-sm" onclick="window.verRepresentantes(${p.id})">👥 Representantes</button>
-          <button class="btn-sm success ${votados[idx]?.votado ? 'votado' : ''}" 
-                  onclick="window.abrirVotacion(${p.id})" 
+          <button class="btn-sm success ${votados[idx]?.votado ? 'votado' : ''}"
+                  onclick="window.abrirVotacion(${p.id})"
                   ${votados[idx]?.votado ? 'disabled' : ''}>
             ${votados[idx]?.votado ? '✓ Votado' : '🗳 Votar'}
           </button>
-          ${isAdmin ? `<button class="btn-sm" style="background:#e74c3c;color:white;" onclick="window.eliminarProyecto(${p.id})">🗑 Eliminar</button>` : ''}
+          ${isAdmin ? `
+            <button class="btn-sm" style="background:#f39c12;color:white;" onclick="window.abrirEdicion(${p.id})">✏️ Editar</button>
+            <button class="btn-sm" style="background:#e74c3c;color:white;" onclick="window.eliminarProyecto(${p.id})">🗑 Eliminar</button>
+          ` : ''}
         </div>
       </div>
     `).join('');
@@ -44,16 +52,6 @@ export async function cargarProyectos() {
     container.innerHTML = '<div class="empty-state">Error al cargar proyectos</div>';
     showToast(err.message, 'error');
   }
-}
-
-function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/[&<>]/g, function(m) {
-    if (m === '&') return '&amp;';
-    if (m === '<') return '&lt;';
-    if (m === '>') return '&gt;';
-    return m;
-  });
 }
 
 window.verRepresentantes = async (idProyecto) => {
@@ -65,18 +63,24 @@ window.verRepresentantes = async (idProyecto) => {
     modal.innerHTML = `
       <div class="modal-box" style="max-width: 500px;">
         <div class="modal-header">
-          <div class="modal-title">Representantes - ${escapeHtml(proyecto?.nombre || '')}</div>
+          <div class="modal-title">Representantes — ${escapeHtml(proyecto?.nombre || '')}</div>
           <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
         </div>
         <div class="modal-body">
           <div class="reps-grid">
-            ${reps.map(r => `<div class="rep-card"><div class="rep-avatar-placeholder">${r.nombre[0]}</div><div class="rep-name">${escapeHtml(r.nombre)}</div><div class="rep-curso">${escapeHtml(r.curso || '—')}</div><div class="rep-contact">📱 ${escapeHtml(r.contacto || '—')}</div></div>`).join('')}
+            ${reps.map(r => `
+              <div class="rep-card">
+                <div class="rep-avatar-placeholder">${escapeHtml(r.nombre[0])}</div>
+                <div class="rep-name">${escapeHtml(r.nombre)}</div>
+                <div class="rep-curso">${escapeHtml(r.curso || '—')}</div>
+                <div class="rep-contact">📱 ${escapeHtml(r.contacto || '—')}</div>
+              </div>
+            `).join('')}
           </div>
         </div>
       </div>
     `;
     document.body.appendChild(modal);
-    modal.querySelector('.modal-close').onclick = () => modal.remove();
   } catch (err) {
     showToast('Error al cargar representantes', 'error');
   }
@@ -96,12 +100,11 @@ window.abrirVotacion = (idProyecto) => {
     <div id="voto-error" class="error-msg" style="display:none;"></div>
   `;
   modal.classList.add('open');
-  const input = document.getElementById('voto-pin');
-  input.focus();
+  document.getElementById('voto-pin').focus();
   const confirmBtn = document.getElementById('confirmar-voto');
   const errorDiv = document.getElementById('voto-error');
-  confirmBtn.onclick = async () => {
-    const pin = input.value.trim();
+  const handler = async () => {
+    const pin = document.getElementById('voto-pin').value.trim();
     if (!pin || pin.length !== 4) {
       errorDiv.textContent = 'Ingresa el PIN de 4 dígitos';
       errorDiv.style.display = 'block';
@@ -113,8 +116,8 @@ window.abrirVotacion = (idProyecto) => {
       await votar(proyecto.id, pin, deviceId);
       showToast('¡Voto registrado exitosamente!', 'success');
       closeModal('modal-voto');
-      cargarProyectos(); // refrescar lista
-      cargarResultados(); // actualizar ranking
+      cargarProyectos();
+      cargarResultados();
     } catch (err) {
       errorDiv.textContent = err.message;
       errorDiv.style.display = 'block';
@@ -122,6 +125,8 @@ window.abrirVotacion = (idProyecto) => {
       confirmBtn.textContent = 'Verificar y votar';
     }
   };
+  confirmBtn.onclick = handler;
+  document.getElementById('voto-pin').onkeypress = (e) => { if (e.key === 'Enter') handler(); };
   document.getElementById('modal-voto-close').onclick = () => closeModal('modal-voto');
 };
 
@@ -137,10 +142,27 @@ window.eliminarProyecto = async (id) => {
   }
 };
 
+// Fix bug #6: abrir modal de edición con datos precargados
+window.abrirEdicion = (idProyecto) => {
+  const proyecto = proyectos.find(p => p.id == idProyecto);
+  if (!proyecto) return;
+  document.getElementById('proyecto-modal-title').innerText = 'Editar Proyecto';
+  document.getElementById('proy-nombre').value = proyecto.nombre;
+  document.getElementById('proy-desc').value = proyecto.descripcion || '';
+  document.getElementById('proy-pin').value = '';
+  document.getElementById('proy-pin').placeholder = 'Dejar vacío para no cambiar';
+  document.getElementById('reps-container').innerHTML = '';
+  document.getElementById('proyecto-error').style.display = 'none';
+
+  // Guardar referencia al proyecto que se edita
+  document.getElementById('modal-proyecto').dataset.editId = idProyecto;
+  document.getElementById('modal-proyecto').classList.add('open');
+};
+
 // ------------------- Resultados -------------------
 export async function cargarResultados() {
+  setLoading('resultados-container');
   const container = document.getElementById('resultados-container');
-  setLoading('resultados-container', true);
   try {
     const data = await getResultados(isAdmin);
     if (!data.publicos && !isAdmin) {
@@ -154,10 +176,10 @@ export async function cargarResultados() {
     }
     const maxVotos = Math.max(...ranking.map(r => r.votos), 1);
     container.innerHTML = ranking.map((r, i) => {
-      let posClass = i === 0 ? 'oro' : i === 1 ? 'plata' : i === 2 ? 'bronce' : '';
+      const posClass = i === 0 ? 'oro' : i === 1 ? 'plata' : i === 2 ? 'bronce' : '';
       return `
         <div class="resultado-card">
-          <div class="resultado-pos ${posClass}">#${i+1}</div>
+          <div class="resultado-pos ${posClass}">#${i + 1}</div>
           <div style="flex:1;">
             <div style="font-weight:700;">${escapeHtml(r.nombre)}</div>
             <div class="resultado-barra"><div class="resultado-barra-fill" style="width:${(r.votos / maxVotos) * 100}%;"></div></div>
@@ -172,7 +194,7 @@ export async function cargarResultados() {
   }
 }
 
-// ------------------- Admin: Nuevo proyecto -------------------
+// ------------------- Admin: Formulario Crear/Editar -------------------
 function initAdminForms() {
   const btnNuevo = document.getElementById('btn-nuevo-proyecto');
   const modalProy = document.getElementById('modal-proyecto');
@@ -186,6 +208,7 @@ function initAdminForms() {
     document.getElementById('proy-nombre').value = '';
     document.getElementById('proy-desc').value = '';
     document.getElementById('proy-pin').value = '';
+    document.getElementById('proy-pin').placeholder = '1234';
     document.getElementById('reps-container').innerHTML = `
       <div class="rep-row">
         <input type="text" placeholder="Nombre completo" class="rep-nombre">
@@ -194,11 +217,12 @@ function initAdminForms() {
       </div>
     `;
     document.getElementById('proyecto-error').style.display = 'none';
+    delete modalProy.dataset.editId; // asegurarse que no hay id de edición
     modalProy.classList.add('open');
   };
 
-  closeProy.onclick = () => modalProy.classList.remove('open');
-  cancelProy.onclick = () => modalProy.classList.remove('open');
+  closeProy.onclick = () => { modalProy.classList.remove('open'); delete modalProy.dataset.editId; };
+  cancelProy.onclick = () => { modalProy.classList.remove('open'); delete modalProy.dataset.editId; };
 
   agregarRep.onclick = () => {
     const container = document.getElementById('reps-container');
@@ -217,36 +241,67 @@ function initAdminForms() {
     const nombre = document.getElementById('proy-nombre').value.trim();
     const descripcion = document.getElementById('proy-desc').value.trim();
     const pin = document.getElementById('proy-pin').value.trim();
-    const repRows = document.querySelectorAll('#reps-container .rep-row');
-    const representantes = [];
-    repRows.forEach(row => {
-      const nombreRep = row.querySelector('.rep-nombre')?.value.trim();
-      if (nombreRep) {
-        representantes.push({
-          nombre: nombreRep,
-          curso: row.querySelector('.rep-curso')?.value.trim() || '',
-          contacto: row.querySelector('.rep-contacto')?.value.trim() || ''
-        });
+    const editId = modalProy.dataset.editId;
+    const errorEl = document.getElementById('proyecto-error');
+
+    // Fix bug #6: modo edición vs creación
+    if (editId) {
+      // Edición — solo campos modificados
+      if (!nombre) {
+        errorEl.textContent = 'El nombre es obligatorio';
+        errorEl.style.display = 'block';
+        return;
       }
-    });
-    if (!nombre || !pin || representantes.length === 0) {
-      document.getElementById('proyecto-error').textContent = 'Completa nombre, PIN y al menos un representante';
-      document.getElementById('proyecto-error').style.display = 'block';
-      return;
-    }
-    if (!/^\d{4}$/.test(pin)) {
-      document.getElementById('proyecto-error').textContent = 'El PIN debe ser 4 dígitos';
-      document.getElementById('proyecto-error').style.display = 'block';
-      return;
-    }
-    try {
-      await crearProyecto({ nombre, descripcion, pin, representantes });
-      showToast('Proyecto creado correctamente', 'success');
-      modalProy.classList.remove('open');
-      cargarProyectos();
-    } catch (err) {
-      document.getElementById('proyecto-error').textContent = err.message;
-      document.getElementById('proyecto-error').style.display = 'block';
+      if (pin && !/^\d{4}$/.test(pin)) {
+        errorEl.textContent = 'El PIN debe ser 4 dígitos o dejarse vacío';
+        errorEl.style.display = 'block';
+        return;
+      }
+      const datos = { nombre, descripcion };
+      if (pin) datos.pin = pin;
+      try {
+        await editarProyecto(editId, datos);
+        showToast('Proyecto actualizado correctamente', 'success');
+        modalProy.classList.remove('open');
+        delete modalProy.dataset.editId;
+        cargarProyectos();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+      }
+    } else {
+      // Creación — todos los campos requeridos
+      const repRows = document.querySelectorAll('#reps-container .rep-row');
+      const representantes = [];
+      repRows.forEach(row => {
+        const nombreRep = row.querySelector('.rep-nombre')?.value.trim();
+        if (nombreRep) {
+          representantes.push({
+            nombre: nombreRep,
+            curso: row.querySelector('.rep-curso')?.value.trim() || '',
+            contacto: row.querySelector('.rep-contacto')?.value.trim() || ''
+          });
+        }
+      });
+      if (!nombre || !pin || representantes.length === 0) {
+        errorEl.textContent = 'Completa nombre, PIN y al menos un representante';
+        errorEl.style.display = 'block';
+        return;
+      }
+      if (!/^\d{4}$/.test(pin)) {
+        errorEl.textContent = 'El PIN debe ser 4 dígitos';
+        errorEl.style.display = 'block';
+        return;
+      }
+      try {
+        await crearProyecto({ nombre, descripcion, pin, representantes });
+        showToast('Proyecto creado correctamente', 'success');
+        modalProy.classList.remove('open');
+        cargarProyectos();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+      }
     }
   };
 }
@@ -282,7 +337,6 @@ function initNavigation() {
       item.classList.add('active');
       if (view === 'proyectos') cargarProyectos();
       if (view === 'resultados') cargarResultados();
-      // cerrar sidebar en móvil
       document.getElementById('sidebar').classList.remove('open');
     });
   });
@@ -291,29 +345,26 @@ function initNavigation() {
 function initMobileMenu() {
   const menuToggle = document.getElementById('menu-toggle');
   const sidebar = document.getElementById('sidebar');
-  menuToggle.addEventListener('click', () => {
-    sidebar.classList.toggle('open');
-  });
-  // cerrar al hacer clic fuera
+  menuToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
   document.addEventListener('click', (e) => {
-    if (window.innerWidth <= 768 && sidebar.classList.contains('open') && !sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
+    if (window.innerWidth <= 768 && sidebar.classList.contains('open')
+        && !sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
       sidebar.classList.remove('open');
     }
   });
 }
 
 // ------------------- Main -------------------
-(async function() {
+(async function () {
   initAuth();
   initNavigation();
   initMobileMenu();
   initAdminForms();
   initResultadosAdmin();
-  await cargarProyectos();
-  await cargarResultados();
-  // Verificar si hay token para admin UI
   isAdmin = !!localStorage.getItem('adminToken');
   updateAdminUI(isAdmin);
   window.cargarProyectos = cargarProyectos;
   window.cargarResultados = cargarResultados;
+  await cargarProyectos();
+  await cargarResultados();
 })();

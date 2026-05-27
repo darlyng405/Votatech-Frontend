@@ -27,10 +27,37 @@ export function updateAdminUI(isAdmin) {
   }
 }
 
+// Fix bug #2: device_id más robusto con huella de dispositivo
+// Combina datos del navegador para dificultar su borrado/suplantación
+function generarHuellaDispositivo() {
+  const nav = window.navigator;
+  const screen = window.screen;
+  const partes = [
+    nav.userAgent,
+    nav.language,
+    screen.colorDepth,
+    screen.width + 'x' + screen.height,
+    new Date().getTimezoneOffset(),
+    nav.hardwareConcurrency || '',
+    nav.platform || '',
+  ];
+  // Hash simple (djb2) sobre la cadena combinada
+  let hash = 5381;
+  const str = partes.join('|');
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+    hash = hash & hash; // Convertir a 32 bits
+  }
+  return 'fp_' + Math.abs(hash).toString(36);
+}
+
 export function getDeviceId() {
   let deviceId = localStorage.getItem('device_id');
   if (!deviceId) {
-    deviceId = 'dev_' + Math.random().toString(36).substring(2) + Date.now();
+    // Combina huella de dispositivo + valor aleatorio persistido
+    const fingerprint = generarHuellaDispositivo();
+    const aleatorio = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    deviceId = fingerprint + '_' + aleatorio;
     localStorage.setItem('device_id', deviceId);
   }
   return deviceId;
