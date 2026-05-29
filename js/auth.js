@@ -1,4 +1,4 @@
-import { loginAdmin, logoutAdmin, setAuthToken, getUserRol } from './api.js';
+import { loginAdmin, logoutAdmin, setAuthToken } from './api.js';
 import { showToast, updateAdminUI, closeModal } from './ui.js';
 
 export function initAuth() {
