@@ -42,7 +42,13 @@ export async function loginAdmin(pin) {
     method: 'POST',
     body: JSON.stringify({ pin }),
   });
-  setAuthToken(data.token, data.rol);
+  console.log('Respuesta login:', data); // Debug
+  if (data.rol) {
+    setAuthToken(data.token, data.rol);
+  } else {
+    // Fallback: si el backend no envía rol, asumimos admin (compatibilidad)
+    setAuthToken(data.token, 'admin');
+  }
   return data;
 }
 
