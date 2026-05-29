@@ -1,14 +1,18 @@
-import { loginAdmin, logoutAdmin, setAuthToken } from './api.js';
+import { loginAdmin, logoutAdmin, setAuthToken, getUserRol } from './api.js';
 import { showToast, updateAdminUI, closeModal } from './ui.js';
 
 export function initAuth() {
   const token = localStorage.getItem('adminToken');
-  if (token) { setAuthToken(token); updateAdminUI(true); }
+  const rol = localStorage.getItem('userRol');
+  if (token && rol) {
+    setAuthToken(token, rol);
+    updateAdminUI(rol);
+  }
 
   document.getElementById('btn-login').addEventListener('click', openLoginModal);
   document.getElementById('btn-logout').addEventListener('click', () => {
     logoutAdmin();
-    updateAdminUI(false);
+    updateAdminUI(null);
     showToast('Sesión cerrada', 'success');
     location.reload();
   });
@@ -18,10 +22,9 @@ function openLoginModal() {
   const modal = document.getElementById('modal-login');
   modal.classList.add('open');
 
-  // Reemplazar el contenido del modal-body con solo el PIN
   document.querySelector('#modal-login .modal-body').innerHTML = `
     <div class="form-group">
-      <label>PIN de administrador</label>
+      <label>PIN de acceso</label>
       <input type="tel" id="login-pin" maxlength="8" inputmode="numeric"
              class="pin-input" placeholder="• • • • • • • •" autocomplete="off">
     </div>
@@ -44,10 +47,10 @@ function openLoginModal() {
     }
     btn.disabled = true; btn.textContent = 'Verificando…';
     try {
-      await loginAdmin(pin);
+      const data = await loginAdmin(pin);
       closeModal('modal-login');
-      showToast('Bienvenido, administrador ✓', 'success');
-      updateAdminUI(true);
+      showToast(`Bienvenido, ${data.rol === 'admin' ? 'Administrador' : 'Editor'} ✓`, 'success');
+      updateAdminUI(data.rol);
       if (window.cargarProyectos)  window.cargarProyectos();
       if (window.cargarResultados) window.cargarResultados();
     } catch (err) {
