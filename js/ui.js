@@ -40,20 +40,27 @@ export function closeModal(modalId) {
 }
 
 export function updateAdminUI(rol) {
+  console.log('updateAdminUI recibió rol:', rol); // Debug
   const isAdmin = (rol === 'admin');
   const isEditor = (rol === 'editor');
   const isLogged = isAdmin || isEditor;
 
+  // Elementos solo para admin (resultados toggle, editar/eliminar proyectos)
   document.querySelectorAll('.admin-only').forEach(el => {
     el.style.display = isAdmin ? '' : 'none';
   });
+  // Elementos para admin y editor (botón nuevo proyecto)
   document.querySelectorAll('.editor-only').forEach(el => {
     el.style.display = isLogged ? '' : 'none';
   });
 
-  document.getElementById('btn-login').style.display = isLogged ? 'none' : '';
-  document.getElementById('btn-logout').style.display = isLogged ? '' : 'none';
+  // Botones de login/logout
+  const btnLogin = document.getElementById('btn-login');
+  const btnLogout = document.getElementById('btn-logout');
+  if (btnLogin) btnLogin.style.display = isLogged ? 'none' : '';
+  if (btnLogout) btnLogout.style.display = isLogged ? '' : 'none';
 
+  // Bottom nav admin button
   const bnavAdmin = document.getElementById('bnav-admin');
   if (bnavAdmin) {
     if (isAdmin) bnavAdmin.innerHTML = '<span class="bnav-icon">🚪</span>Salir';
@@ -61,5 +68,6 @@ export function updateAdminUI(rol) {
     else bnavAdmin.innerHTML = '<span class="bnav-icon">🔐</span>Admin';
   }
 
+  // Notificar a app.js del cambio de rol
   if (typeof window.setUserRol === 'function') window.setUserRol(rol);
 }
