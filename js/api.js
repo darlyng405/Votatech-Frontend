@@ -50,13 +50,48 @@ export async function logoutAdmin() {
   setAuthToken(null, null);
 }
 
-// Resto de funciones (getProyectos, crearProyecto, etc.) se mantienen igual
-export async function getProyectos() { ... }
-export async function crearProyecto(proyecto) { ... }
-export async function editarProyecto(id, datos) { ... }
-export async function eliminarProyecto(id) { ... }
-export async function getRepresentantes(idProyecto) { ... }
-export async function votar(id_proyecto, pin, device_id) { ... }
-export async function checkHaVotado(id_proyecto, device_id) { ... }
-export async function getResultados(admin = false) { ... }
-export async function toggleResultadosPublicos() { ... }
+export async function getProyectos() {
+  return request('/proyectos');
+}
+
+export async function crearProyecto(proyecto) {
+  return request('/proyectos', {
+    method: 'POST',
+    body: JSON.stringify(proyecto),
+  });
+}
+
+export async function editarProyecto(id, datos) {
+  return request(`/proyectos/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(datos),
+  });
+}
+
+export async function eliminarProyecto(id) {
+  return request(`/proyectos/${id}`, { method: 'DELETE' });
+}
+
+export async function getRepresentantes(idProyecto) {
+  return request(`/proyectos/${idProyecto}/representantes`);
+}
+
+export async function votar(id_proyecto, pin, device_id) {
+  return request('/votos', {
+    method: 'POST',
+    body: JSON.stringify({ id_proyecto, pin, device_id }),
+  });
+}
+
+export async function checkHaVotado(id_proyecto, device_id) {
+  return request(`/votos/check?id_proyecto=${id_proyecto}&device_id=${device_id}`);
+}
+
+export async function getResultados(admin = false) {
+  const endpoint = admin ? '/resultados/admin' : '/resultados';
+  return request(endpoint);
+}
+
+export async function toggleResultadosPublicos() {
+  return request('/resultados/toggle', { method: 'POST' });
+}
