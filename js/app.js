@@ -1,14 +1,15 @@
 import { getProyectos, crearProyecto, editarProyecto, eliminarProyecto,
          getRepresentantes, votar, checkHaVotado,
-         getResultados, toggleResultadosPublicos } from './api.js';
+         getResultados, toggleResultadosPublicos, getUserRol } from './api.js';
 import { showToast, closeModal, updateAdminUI, getDeviceId } from './ui.js';
 import { initAuth } from './auth.js';
 
 let proyectos = [];
 let deviceId  = getDeviceId();
-let isAdmin   = false;
+let userRol   = getUserRol();
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+window.setUserRol = (rol) => { userRol = rol; };
+
 function esc(str) {
   if (!str) return '';
   return String(str).replace(/[&<>"']/g, m =>
@@ -20,7 +21,6 @@ function setLoading(id) {
     '<div class="loader"><span></span><span></span><span></span></div>';
 }
 
-// ─── Proyectos ─────────────────────────────────────────────────────────────
 export async function cargarProyectos() {
   setLoading('proyectos-container');
   const container = document.getElementById('proyectos-container');
@@ -36,17 +36,21 @@ export async function cargarProyectos() {
       return;
     }
 
-    // Verificar si ya votó en cada proyecto
     const votados = await Promise.all(
       proyectos.map(p => checkHaVotado(p.id, deviceId).catch(() => ({ votado: false })))
     );
 
     container.innerHTML = proyectos.map((p, i) => {
       const yaVoto = votados[i]?.votado;
-      const adminBtns = isAdmin ? `
+      const puedeVotar = (userRol !== 'editor') && !yaVoto;
+      const mostrarBotonesAdmin = (userRol === 'admin');
+      const adminBtns = mostrarBotonesAdmin ? `
         <button class="btn-sm warning" onclick="window.abrirEdicion(${p.id})">✏️ Editar</button>
         <button class="btn-sm danger"  onclick="window.confirmarEliminar(${p.id})">🗑 Eliminar</button>
       ` : '';
+      const votoBtn = puedeVotar
+        ? `<button class="btn-sm primary" onclick="window.abrirVotacion(${p.id})">🗳 Votar</button>`
+        : (yaVoto ? `<button class="btn-sm votado" disabled>✓ Ya votaste</button>` : '');
       return `
         <div class="proyecto-card">
           <div class="card-accent"></div>
@@ -57,11 +61,7 @@ export async function cargarProyectos() {
           </div>
           <div class="card-actions">
             <button class="btn-sm" onclick="window.verRepresentantes(${p.id})">👥 Equipo</button>
-            <button class="btn-sm ${yaVoto ? 'votado' : 'primary'}"
-                    onclick="${yaVoto ? '' : `window.abrirVotacion(${p.id})`}"
-                    ${yaVoto ? 'disabled' : ''}>
-              ${yaVoto ? '✓ Ya votaste' : '🗳 Votar'}
-            </button>
+            ${votoBtn}
             ${adminBtns}
           </div>
         </div>`;
@@ -71,7 +71,6 @@ export async function cargarProyectos() {
   }
 }
 
-// ─── Ver equipo ────────────────────────────────────────────────────────────
 window.verRepresentantes = async (idProyecto) => {
   const proyecto = proyectos.find(p => p.id == idProyecto);
   let reps = [];
@@ -107,7 +106,6 @@ window.verRepresentantes = async (idProyecto) => {
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
 };
 
-// ─── Votar ─────────────────────────────────────────────────────────────────
 window.abrirVotacion = (idProyecto) => {
   const proyecto = proyectos.find(p => p.id == idProyecto);
   if (!proyecto) return;
@@ -122,7 +120,7 @@ window.abrirVotacion = (idProyecto) => {
       <div class="pin-hint">Pide el PIN de 4 dígitos a los representantes del proyecto.</div>
     </div>
     <button id="confirmar-voto" class="btn-primary">Confirmar voto</button>
-    <div id="voto-error" class="error-msg"></div
+    <div id="voto-error" class="error-msg"></div>
   `;
 
   const modal = document.getElementById('modal-voto');
@@ -160,7 +158,6 @@ window.abrirVotacion = (idProyecto) => {
   document.getElementById('modal-voto-close').onclick = () => closeModal('modal-voto');
 };
 
-// ─── Eliminar con confirmación ────────────────────────────────────────────
 window.confirmarEliminar = (id) => {
   const proyecto = proyectos.find(p => p.id == id);
   if (!confirm(`¿Eliminar "${proyecto?.nombre}"? Se borrarán todos sus votos.`)) return;
@@ -169,7 +166,6 @@ window.confirmarEliminar = (id) => {
     .catch(err => showToast(err.message, 'error'));
 };
 
-// ─── Editar proyecto ───────────────────────────────────────────────────────
 window.abrirEdicion = (idProyecto) => {
   const p = proyectos.find(x => x.id == idProyecto);
   if (!p) return;
@@ -184,17 +180,16 @@ window.abrirEdicion = (idProyecto) => {
   document.getElementById('modal-proyecto').classList.add('open');
 };
 
-// ─── Resultados ────────────────────────────────────────────────────────────
 export async function cargarResultados() {
   setLoading('resultados-container');
   const container = document.getElementById('resultados-container');
   try {
-    const data = await getResultados(isAdmin);
+    const data = await getResultados(userRol === 'admin');
     const btnToggle = document.getElementById('btn-toggle-resultados');
-    if (isAdmin && btnToggle) {
+    if (userRol === 'admin' && btnToggle) {
       btnToggle.textContent = data.publicos ? '🔒 Ocultar resultados' : '📢 Publicar resultados';
     }
-    if (!data.publicos && !isAdmin) {
+    if (!data.publicos && userRol !== 'admin') {
       container.innerHTML = `
         <div class="resultados-bloqueados">
           <div class="lock-icon">🔒</div>
@@ -235,7 +230,6 @@ export async function cargarResultados() {
   }
 }
 
-// ─── Formulario admin: crear / editar ─────────────────────────────────────
 function initAdminForms() {
   const modal     = document.getElementById('modal-proyecto');
   const closeBtn  = document.getElementById('modal-proyecto-close');
@@ -284,7 +278,6 @@ function initAdminForms() {
     if (!nombre) { errEl.textContent = 'El nombre es obligatorio.'; errEl.style.display = 'block'; return; }
 
     if (editId) {
-      // — Edición —
       if (pin && !/^\d{4}$/.test(pin)) {
         errEl.textContent = 'El PIN debe ser de 4 dígitos o déjalo vacío.';
         errEl.style.display = 'block'; return;
@@ -300,7 +293,6 @@ function initAdminForms() {
       } catch (err) { errEl.textContent = err.message; errEl.style.display = 'block'; }
       finally { saveBtn.disabled = false; saveBtn.textContent = 'Guardar'; }
     } else {
-      // — Creación —
       if (!/^\d{4}$/.test(pin)) {
         errEl.textContent = 'El PIN debe ser de 4 dígitos.';
         errEl.style.display = 'block'; return;
@@ -331,7 +323,6 @@ function initAdminForms() {
   };
 }
 
-// ─── Toggle resultados ────────────────────────────────────────────────────
 function initResultadosAdmin() {
   document.getElementById('btn-toggle-resultados').onclick = async () => {
     try {
@@ -342,7 +333,6 @@ function initResultadosAdmin() {
   };
 }
 
-// ─── Navegación ────────────────────────────────────────────────────────────
 function cambiarVista(view) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(`view-${view}`)?.classList.add('active');
@@ -350,13 +340,12 @@ function cambiarVista(view) {
   document.querySelectorAll('.bottom-nav-item[data-view]').forEach(n => n.classList.toggle('active', n.dataset.view === view));
   if (view === 'proyectos') cargarProyectos();
   if (view === 'resultados') cargarResultados();
-  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar')?.classList.remove('open');
 }
 
 function initNavigation() {
   document.querySelectorAll('.nav-item[data-view]').forEach(item =>
     item.addEventListener('click', () => cambiarVista(item.dataset.view)));
-
   document.querySelectorAll('.bottom-nav-item[data-view]').forEach(item =>
     item.addEventListener('click', () => cambiarVista(item.dataset.view)));
 }
@@ -370,10 +359,8 @@ function initMobileMenu() {
         && !sidebar.contains(e.target) && !toggle.contains(e.target))
       sidebar.classList.remove('open');
   });
-
-  // Bottom nav: botón admin
   document.getElementById('bnav-admin').addEventListener('click', () => {
-    if (isAdmin) {
+    if (userRol) {
       if (confirm('¿Cerrar sesión?')) { document.getElementById('btn-logout').click(); }
     } else {
       document.getElementById('btn-login').click();
@@ -381,7 +368,6 @@ function initMobileMenu() {
   });
 }
 
-// ─── Bootstrap ────────────────────────────────────────────────────────────
 (async function () {
   initAuth();
   initNavigation();
@@ -389,13 +375,12 @@ function initMobileMenu() {
   initAdminForms();
   initResultadosAdmin();
 
-  isAdmin = !!localStorage.getItem('adminToken');
-  updateAdminUI(isAdmin);
+  userRol = getUserRol();
+  updateAdminUI(userRol);
 
-  // Exponer para auth.js
   window.cargarProyectos  = cargarProyectos;
   window.cargarResultados = cargarResultados;
-  window.setIsAdmin = (val) => { isAdmin = val; };
+  window.setIsAdmin = (val) => { userRol = val ? 'admin' : null; };
 
   await cargarProyectos();
   await cargarResultados();
